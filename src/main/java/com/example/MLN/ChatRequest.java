@@ -11,5 +11,5 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class ChatRequest {
     String question;
-    String userId;
+    String conversationId;
 }

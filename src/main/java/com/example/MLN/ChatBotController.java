@@ -24,7 +24,7 @@ public class ChatBotController {
             @RequestBody ChatRequest request
     ) {
         ChatBotResponse response = ChatBotResponse.builder()
-                .answer(chatBotService.chat(request.getQuestion(), request.getUserId()))
+                .answer(chatBotService.chat(request.getQuestion(), request.getConversationId()))
                 .build();
         return ResponseEntity.ok(response);
     }
@@ -32,10 +32,15 @@ public class ChatBotController {
     @PostMapping(value = "/rag", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ChatBotResponse> rag(
             @Parameter(content = @Content(mediaType = MediaType.MULTIPART_FORM_DATA_VALUE))
-            @RequestParam(value = "files", required = false) List<MultipartFile> files
+            @RequestParam("file") MultipartFile file
     ) {
-        chatBotService.rag(files);
-        return ResponseEntity.ok(ChatBotResponse.builder().answer("RAG process completed").build());
+        chatBotService.rag(file);
+
+        return ResponseEntity.ok(
+                ChatBotResponse.builder()
+                        .answer("RAG process completed")
+                        .build()
+        );
     }
 
     @GetMapping("/history/{conversationId}")

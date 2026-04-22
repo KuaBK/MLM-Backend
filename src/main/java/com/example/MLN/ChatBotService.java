@@ -33,76 +33,62 @@ public class ChatBotService {
         this.vectorStore = vectorStore;
     }
 
-    public String chat(String question, String userId) {
+    public String chat(String question, String conversationId) {
         return chatClient.prompt()
                 .options(GoogleGenAiChatOptions.builder()
                         .model("gemini-3.1-flash-lite-preview")
                         .build())
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, userId))
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .advisors(QuestionAnswerAdvisor.builder(vectorStore).build())
                 .user(u -> u.text(question))
                 .call()
                 .content();
     }
 
-    public void rag(List<MultipartFile> files) {
-        List<Resource> resourceList = convertResources(files);
-        ingestResources(resourceList);
-    }
-
-    private List<Resource> convertResources(List<MultipartFile> files) {
-        if (files == null || files.isEmpty()) return List.of();
-        List<Resource> result = new ArrayList<>();
-        for (MultipartFile file : files) {
-            if (file.isEmpty()) continue;
-
-            try {
-                Resource resource = new ByteArrayResource(file.getBytes()) {
-                    @Override
-                    public String getFilename() {
-                        return file.getOriginalFilename();
-                    }
-                };
-                result.add(resource);
-            } catch (Exception e) {
-                throw new InternalException("Failed to read file: " + file.getOriginalFilename(), e);
-            }
+    public void rag(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new InternalException("File is empty");
         }
 
-        return result;
+        Resource resource = convertResource(file);
+        ingestResource(resource);
     }
 
-    private void ingestResources(List<Resource> resources) {
+    private Resource convertResource(MultipartFile file) {
+        try {
+            return new ByteArrayResource(file.getBytes()) {
+                @Override
+                public String getFilename() {
+                    return file.getOriginalFilename();
+                }
+            };
+        } catch (Exception e) {
+            throw new InternalException("Failed to read file: " + file.getOriginalFilename(), e);
+        }
+    }
+
+    private void ingestResource(Resource resource) {
         try {
             TextSplitter splitter = new TokenTextSplitter();
 
-            List<CompletableFuture<List<Document>>> futures = resources.stream()
-                    .map(resource -> CompletableFuture.supplyAsync(() -> {
-                        try {
-                            TikaDocumentReader reader = new TikaDocumentReader(resource);
-                            List<Document> docs = splitter.split(reader.read());
-                            docs.forEach(d -> d.getMetadata().put("filename", resource.getFilename()));
-                            return docs;
-                        } catch (Exception e) {
-                            log.error("[ChatBot] Lỗi khi đọc file {}: {}", resource.getFilename(), e.getMessage(), e);
-                            return List.<Document>of();
-                        }
-                    }))
-                    .toList();
+            TikaDocumentReader reader = new TikaDocumentReader(resource);
+            log.info("File name: {}", resource.getFilename());
 
-            List<Document> allDocuments = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                    .thenApply(v -> futures.stream()
-                            .flatMap(f -> f.join().stream())
-                            .toList())
-                    .join();
+            List<Document> docs = splitter.split(reader.read());
 
-            if (!allDocuments.isEmpty()) {
-                vectorStore.accept(allDocuments);
-                log.info("[ChatBot] Đã ingest {} document chunks từ {} file(s)",
-                        allDocuments.size(), resources.size());
+            log.info("Docs size: {}", docs.size());
+
+            docs.forEach(d -> d.getMetadata().put("filename", resource.getFilename()));
+
+            if (!docs.isEmpty()) {
+                vectorStore.accept(docs);
+                log.info("[ChatBot] Đã ingest {} document chunks từ file {}",
+                        docs.size(), resource.getFilename());
             }
-        } catch (Exception ex) {
-            log.error("[ChatBot] Lỗi khi ingest file: {}", ex.getMessage(), ex);
+
+        } catch (Exception e) {
+            log.error("[ChatBot] Lỗi khi ingest file {}: {}",
+                    resource.getFilename(), e.getMessage(), e);
         }
     }
 }
